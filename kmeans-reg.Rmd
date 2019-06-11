@@ -1,0 +1,93 @@
+---
+title: "Prototypes: K-Means"
+subtitle: "Predicting Solar Power Generation from Weather Data"
+author: "Alex Kim"
+date: "Spring 2019"
+output:
+  pdf_document:
+    number_sections: true
+fontsize: 11 pt
+header-includes: \usepackage{palatino} \usepackage{inconsolata}
+---
+
+# Overview
+
+Here, we design our baseline models for the NSRDB Las Vegas data from 2016 to 2017.
+
+# Setup
+
+## R Packages
+
+```{R}
+library(tidyverse)
+library(reshape2)
+```
+
+## Load Data
+
+Read CSVs, skip first 2 lines (metadata)
+
+```{R message=FALSE}
+nsrdb_16 <- read_csv("data/105130_36.17_-115.14_2016.csv", skip = 2)
+nsrdb_17 <- read_csv("data/105130_36.17_-115.14_2017.csv", skip = 2)
+nsrdb <- bind_rows(nsrdb_16, nsrdb_17)
+
+rm(nsrdb_16, nsrdb_17)
+```
+
+## Clean Data
+
+Remove extraneous variables and observations (e.g. other solar intensity measurements)
+
+```{R}
+# Remove extraneous vars
+rm_vars <- c("DHI", "DNI", "Clearsky DHI", "Clearsky DNI", "Clearsky GHI")
+nsrdb <- select(nsrdb, -rm_vars)
+
+# Remove extraneous obs
+nsrdb <- filter(nsrdb, `Fill Flag` == 0)
+nsrdb <- select(nsrdb, -`Fill Flag`)
+
+rm(rm_vars)
+```
+
+Re-code hours to encapsulate both hours and minutes
+
+```{R}
+nsrdb <- mutate(nsrdb, Hour = Hour + Minute / 60)
+nsrdb <- select(nsrdb, -Minute)
+```
+
+## Rearrage for K-means
+
+```{R}
+solar_days <- select(nsrdb, GHI, Year, Month, Day, Hour)
+solar_days <- mutate(solar_days, day_id = str_c(Year, Month, Day, sep = "_"))
+solar_days <- select(solar_days, -Year, -Month, -Day)
+
+cluster_data <- matrix(ncol = 48)
+
+for(day in unique(solar_days$day_id)) {
+  solar_day <- filter(solar_days, day_id == day)
+  solar_day <- select(solar_day, -day_id, -Hour)
+  solar_day <- t(solar_day)
+  if(ncol(solar_day == 48)) {
+    cluster_data <- bind_rows(as_tibble(cluster_data), as_tibble(solar_day))
+  }
+}
+
+cluster_data <- tail(cluster_data, -1)
+cluster_data <- na.omit(cluster_data)
+
+clusters <- kmeans(x = cluster_data, centers = 5)
+centroids <- clusters$centers
+
+centroids <- t(centroids)
+centroids <- mutate(as_tibble(centroids), t = 1:nrow(centroids))
+
+centroids <- melt(centroids, id.vars = "t")
+
+ggplot(centroids, aes(t,value, col=variable)) + 
+  geom_point() + xlab("Time") + ylab("Solar Intensity (GHI)") + theme_light()
+ggsave("clusters.png", width=5, height=3)
+```

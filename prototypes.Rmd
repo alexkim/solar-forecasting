@@ -1,0 +1,191 @@
+---
+title: "Prototypes"
+subtitle: "Predicting Solar Power Generation from Weather Data"
+author: "Alex Kim"
+date: "Spring 2019"
+output:
+  pdf_document:
+    number_sections: true
+fontsize: 11 pt
+header-includes: \usepackage{palatino} \usepackage{inconsolata}
+---
+
+# Overview
+
+Here, we design our baseline models for the NSRDB Las Vegas data from 2016 to 2017.
+
+# Setup
+
+## R Packages
+
+```{R}
+library(tidyverse)
+```
+
+## Load Data
+
+Read CSVs, skip first 2 lines (metadata)
+
+```{R message=FALSE}
+nsrdb_16 <- read_csv("data/105130_36.17_-115.14_2016.csv", skip = 2)
+nsrdb_17 <- read_csv("data/105130_36.17_-115.14_2017.csv", skip = 2)
+nsrdb <- bind_rows(nsrdb_16, nsrdb_17)
+
+rm(nsrdb_16, nsrdb_17)
+```
+
+## Clean Data
+
+Remove extraneous variables and observations (e.g. other solar intensity measurements)
+
+```{R}
+# Remove extraneous vars
+rm_vars <- c("DHI", "DNI", "Clearsky DHI", "Clearsky DNI", "Clearsky GHI")
+nsrdb <- select(nsrdb, -rm_vars)
+
+# Remove extraneous obs
+nsrdb <- filter(nsrdb, `Fill Flag` == 0)
+nsrdb <- select(nsrdb, -`Fill Flag`)
+
+rm(rm_vars)
+```
+
+Re-code hours to encapsulate both hours and minutes
+
+```{R}
+nsrdb <- mutate(nsrdb, Hour = Hour + Minute / 60)
+nsrdb <- select(nsrdb, -Minute)
+```
+
+## Model Preparation
+
+Standardize features
+
+```{R}
+# Separate predictors and response
+weather <- as.matrix(select(nsrdb, -GHI))
+solar <- select(nsrdb, GHI)
+
+# Scale predictors
+weather <- scale(weather)
+
+# Join predictors and response again
+nsrdb <- bind_cols(as_tibble(weather), solar)
+rm(weather, solar)
+```
+
+Convert factors to factors
+
+```{R}
+nsrdb <- mutate(nsrdb, "Cloud Type" = as.factor(`Cloud Type`))
+```
+
+Impose 48-hour offset
+
+```{R}
+n <- nrow(nsrdb)
+offset <- 48 * 2  # 48 hrs * 2 measurements per hour
+
+weather <- head(select(nsrdb, -GHI), -offset)
+solar <- tail(select(nsrdb, GHI), -offset)
+
+nsrdb <- bind_cols(weather, solar)
+
+rm(n, offset, weather, solar)
+```
+
+Divide into train and test set
+
+```{R}
+set.seed(1)
+n <- nrow(nsrdb)
+
+# Determine indexes for the training set
+train_proportion <- 0.5
+train_size <- round(train_proportion * n)
+train_indexes <- sample(x = 1:n, size = train_size)
+
+# Generate a train and test set
+nsrdb_train <- nsrdb[train_indexes,]
+nsrdb_test <- nsrdb[-train_indexes,]
+
+rm(n, train_proportion, train_size, train_indexes)
+```
+
+# Linear Regression
+
+Baseline model
+
+## Training
+
+```{R}
+model <- lm(GHI ~ ., data = nsrdb_train)
+summary(model)$r.squared
+```
+
+## Testing
+
+```{R}
+solar_predict <- predict(model, nsrdb_test)
+solar_true <- nsrdb_test$GHI
+
+mse <- mean((solar_predict - solar_true)^2)
+r_sq <- 1 - mse / var(solar_true)
+
+rm(solar_predict, solar_true, mse)
+```
+
+# Linear Regression with Multiple Observations
+
+## Feature Expansion (additional offset)
+
+```{R}
+nsrdb_expanded <- nsrdb
+expansion_count <- 5
+offset <- 24 * 2  # 24 hrs * 2 measurements per hour
+
+for(i in 1:expansion_count) {
+  trimmed <- tail(nsrdb_expanded, -offset)  # existing data
+  new <- head(select(nsrdb_expanded, -GHI), -offset)  # "new" features
+  nsrdb_expanded <- bind_cols(trimmed, new)
+}
+
+rm(expansion_count, offset, new, trimmed)
+```
+
+## Divide into Train and Test Set
+
+```{R}
+set.seed(1)
+n <- nrow(nsrdb_expanded)
+
+# Determine indexes for the training set
+train_proportion <- 0.5
+train_size <- round(train_proportion * n)
+train_indexes <- sample(x = 1:n, size = train_size)
+
+# Generate a train and test set
+nsrdb_train <- nsrdb_expanded[train_indexes,]
+nsrdb_test <- nsrdb_expanded[-train_indexes,]
+
+rm(n, train_proportion, train_size, train_indexes)
+```
+
+## Training
+
+```{R}
+model <- lm(GHI ~ ., data = nsrdb_train)
+summary(model)$r.squared
+```
+
+## Testing
+
+```{R}
+solar_predict <- predict(model, nsrdb_test)
+solar_true <- nsrdb_test$GHI
+
+mse <- mean((solar_predict - solar_true)^2)
+r_sq <- 1 - mse / var(solar_true)
+
+rm(solar_predict, solar_true, mse)
+```
