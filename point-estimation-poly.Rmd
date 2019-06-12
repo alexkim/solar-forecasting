@@ -106,7 +106,7 @@ rm(n, offset, ids, predictors, solar)
 
 ```{R}
 nsrdb_expanded <- nsrdb
-expansion_count <- 29
+expansion_count <- 1
 offset <- 1  # 1 = standard, 2+ = dilation
 
 for(i in 1:expansion_count) {
@@ -119,6 +119,28 @@ for(i in 1:expansion_count) {
 nsrdb <- nsrdb_expanded
 
 rm(expansion_count, offset, original, expansion, nsrdb_expanded)
+```
+
+## Feature expansion 2: polynomial expansion
+
+```{R}
+# Prepare for expanding features
+ids <- select(nsrdb, ID)
+response <- select(nsrdb, GHI)
+predictors <- select(nsrdb, -GHI, -ID)
+
+# Generate squared terms
+clouds <- select(nsrdb, starts_with("Cloud"))  # Temporarily remove b/c can't square factors
+sq_names <- str_c(names(select(predictors, -starts_with("Cloud"))), "_sq")
+predictors_sq <- select(predictors, -starts_with("Cloud"))^2
+colnames(predictors_sq) <- sq_names
+
+# Generate pair-wise interaction terms
+predictors <- as_tibble(model.matrix(~ .^2, predictors))
+
+# Merge expanded features into original tibble
+nsrdb <- cbind(ids, predictors, predictors_sq, response)
+rm(ids, clouds, predictors, predictors_sq, response)
 ```
 
 # Split Data into Train/Validation/Test

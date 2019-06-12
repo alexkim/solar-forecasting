@@ -20,6 +20,7 @@ Linear Regression
 
 ```{R}
 library(tidyverse)
+library(glmnet)
 ```
 
 ## Load Data
@@ -106,7 +107,7 @@ rm(n, offset, ids, predictors, solar)
 
 ```{R}
 nsrdb_expanded <- nsrdb
-expansion_count <- 29
+expansion_count <- 49
 offset <- 1  # 1 = standard, 2+ = dilation
 
 for(i in 1:expansion_count) {
@@ -156,14 +157,29 @@ Baseline model
 ## Training
 
 ```{R}
-model <- lm(GHI ~ ., data = train_data)
-summary(model)$r.squared
+predictors <- data.matrix(select(train_data, -GHI))
+response <- unlist(select(train_data, GHI))
+model <- cv.glmnet(x = predictors, y = response, alpha = 0)
+opt_lambda <- model$lambda.min
+
+opt_model <- glmnet(x = predictors, y = response, alpha = 0, lambda = opt_lambda)
+
+# Compute test R^2
+solar_predict <- predict(model, predictors)
+solar_true <- train_data$GHI
+
+mse <- mean((solar_predict - solar_true)^2)
+r_sq <- 1 - mse / var(solar_true)
+r_sq
+
+rm(solar_predict, solar_true, mse)
 ```
 
 ## Validation
 
 ```{R}
-solar_predict <- predict(model, valid_data)
+valid_predictors <- data.matrix(select(valid_data, -GHI))
+solar_predict <- predict(model, valid_predictors)
 solar_true <- valid_data$GHI
 
 mse <- mean((solar_predict - solar_true)^2)
@@ -176,7 +192,8 @@ rm(solar_predict, solar_true, mse)
 ## Testing
 
 ```{R}
-solar_predict <- predict(model, test_data)
+test_predictors <- data.matrix(select(test_data, -GHI))
+solar_predict <- predict(model, test_predictors)
 solar_true <- test_data$GHI
 
 mse <- mean((solar_predict - solar_true)^2)
