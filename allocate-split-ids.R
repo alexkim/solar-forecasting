@@ -14,8 +14,7 @@ nsrdb <- bind_rows(nsrdb_16, nsrdb_17)
 rm(nsrdb_16, nsrdb_17)
 
 # Generate unique IDs for each day
-nsrdb <- mutate(nsrdb, ID = str_c(Year, Month, Day, sep="-"))
-ids <- select(nsrdb, ID)
+ids <- transmute(nsrdb, ID = str_c(Year, Month, Day, sep="-"))
 ids <- unlist(distinct(ids))
 n <- length(ids)
 rm(nsrdb)
@@ -42,6 +41,6 @@ test_ids <- ids[-valid_indexes]
 # Save ID allocations to CSV
 write_csv(as_tibble(train_ids), "data-allocations/train.csv", col_names = FALSE)
 write_csv(as_tibble(valid_ids), "data-allocations/valid.csv", col_names = FALSE)
-write_csv(as_tibble(valid_ids), "data-allocations/test.csv", col_names = FALSE)
+write_csv(as_tibble(test_ids), "data-allocations/test.csv", col_names = FALSE)
 
 rm(train_proportion, train_size, train_indexes, valid_proportion, valid_size, valid_indexes)

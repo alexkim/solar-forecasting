@@ -1,0 +1,187 @@
+---
+title: "Point Estimation"
+subtitle: "Predicting Solar Power Generation from Weather Data"
+author: "Alex Kim"
+date: "Spring 2019"
+output:
+  pdf_document:
+    number_sections: true
+fontsize: 11 pt
+header-includes: \usepackage{palatino} \usepackage{inconsolata}
+---
+
+# Overview
+
+Linear Regression
+
+# Standard Setup
+
+## R Packages
+
+```{R}
+library(tidyverse)
+```
+
+## Load Data
+
+Read CSVs, skip first 2 lines (metadata)
+
+```{R message=FALSE}
+nsrdb_16 <- read_csv("data/105130_36.17_-115.14_2016.csv", skip = 2)
+nsrdb_17 <- read_csv("data/105130_36.17_-115.14_2017.csv", skip = 2)
+nsrdb <- bind_rows(nsrdb_16, nsrdb_17)
+rm(nsrdb_16, nsrdb_17)
+```
+
+## Clean Data
+
+Remove extraneous variables and observations (e.g. other solar intensity measurements)
+
+```{R}
+# Remove extraneous vars
+rm_vars <- c("DHI", "DNI", "Clearsky DHI", "Clearsky DNI", "Clearsky GHI", "Fill Flag")
+nsrdb <- select(nsrdb, -rm_vars)
+rm(rm_vars)
+```
+
+Re-code hours to encapsulate both hours and minutes
+
+```{R}
+nsrdb <- mutate(nsrdb, Hour = Hour + Minute / 60)
+nsrdb <- select(nsrdb, -Minute)
+```
+
+# Model-Specific Transformations
+
+## Generate a unique ID for each day (for train/validation/test split)
+
+```{R}
+ids <- transmute(nsrdb, ID = str_c(Year, Month, Day, sep="-"))
+```
+
+## Standardize features
+
+```{R}
+# Separate predictors and response
+weather <- as.matrix(select(nsrdb, -GHI))
+solar <- select(nsrdb, GHI)
+
+# Scale predictors
+weather <- scale(weather)
+
+# Join predictors and response again
+nsrdb <- bind_cols(as_tibble(weather), solar)
+rm(weather, solar)
+```
+
+## Convert factors to factor data type
+
+```{R}
+nsrdb <- mutate(nsrdb, "Cloud Type" = as.factor(`Cloud Type`))
+```
+
+## Add IDs to data
+
+```{R}
+nsrdb <- bind_cols(ids, nsrdb)
+rm(ids)
+```
+
+## Impose 48 hour offset for predictors
+
+```{R}
+n <- nrow(nsrdb)
+offset <- 48 * 2  # 48 hrs * 2 measurements per hour
+
+predictors <- head(select(nsrdb, -ID, -GHI), -offset)  # Remove first [offset] rows
+ids <- tail(select(nsrdb, ID), -offset)  # Remove last [offset] rows
+solar <- tail(select(nsrdb, GHI), -offset)  # Remove last [offset] rows
+
+nsrdb <- bind_cols(ids, predictors, solar)
+
+rm(n, offset, ids, predictors, solar)
+```
+
+## Feature expansion: more time points (+additional offset)
+
+```{R}
+nsrdb_expanded <- nsrdb
+expansion_count <- 1
+offset <- 1  # 1 = standard, 2+ = dilation
+
+for(i in 1:expansion_count) {
+  original <- tail(nsrdb_expanded, -offset)  # existing data
+  expansion <- select(nsrdb, -ID, -GHI)
+  expansion <- head(expansion, -(i * offset))  # "new" features
+  nsrdb_expanded <- bind_cols(original, expansion)
+}
+
+nsrdb <- nsrdb_expanded
+
+rm(expansion_count, offset, original, expansion, nsrdb_expanded)
+```
+
+# Split Data into Train/Validation/Test
+
+We approach train and test sets slightly different than per usual. Instead of allocating rows to the train/test set completely at random, we instead allocate entire days (48 contiguous rows). This allows us to retain the same train/test split for both regular point estimation and entire-day prediction (e.g. k-means).
+
+```{R}
+# Read pre-defined ID allocations
+train_ids <- read_csv("data-allocations/train.csv", col_names = FALSE)
+train_ids <- as.character(unlist(train_ids))
+
+valid_ids <- read_csv("data-allocations/valid.csv", col_names = FALSE)
+valid_ids <- as.character(unlist(valid_ids))
+
+test_ids <- read_csv("data-allocations/test.csv", col_names = FALSE)
+test_ids <- as.character(unlist(test_ids))
+
+# Allocate data for train/validation/test sets
+train_data <- filter(nsrdb, ID %in% train_ids)
+valid_data <- filter(nsrdb, ID %in% valid_ids)
+test_data <- filter(nsrdb, ID %in% test_ids)
+
+# Remove IDs
+train_data <- select(train_data, -ID)
+valid_data <- select(valid_data, -ID)
+test_data <- select(test_data, -ID)
+
+rm(train_ids, valid_ids, test_ids)
+```
+
+# Linear Regression
+
+Baseline model
+
+## Training
+
+```{R}
+model <- lm(GHI ~ ., data = train_data)
+summary(model)$r.squared
+```
+
+## Validation
+
+```{R}
+solar_predict <- predict(model, valid_data)
+solar_true <- valid_data$GHI
+
+mse <- mean((solar_predict - solar_true)^2)
+r_sq <- 1 - mse / var(solar_true)
+r_sq
+
+rm(solar_predict, solar_true, mse)
+```
+
+## Testing
+
+```{R}
+solar_predict <- predict(model, test_data)
+solar_true <- test_data$GHI
+
+mse <- mean((solar_predict - solar_true)^2)
+r_sq <- 1 - mse / var(solar_true)
+r_sq
+
+rm(solar_predict, solar_true, mse)
+```
